@@ -32,7 +32,9 @@ DEFAULT_CONFIG = {
         "net_percent": 90,            # alert if usage >= X% of max
         "net_consecutive": 3          # ...for this many consecutive checks
     },
-    "cooldown": 1800          # seconds before re-alerting same issue
+    "cooldown": 1800,         # seconds before re-alerting same issue
+    "conn_report_interval": 3600,  # send top-ports report every N seconds (0=off)
+    "conn_alert_threshold": 200    # alert if any single port exceeds this (0=off)
 }
 
 CONFIG_PATH = Path(os.getenv("MONITOR_CONFIG", "/etc/monitor/config.json"))
@@ -119,6 +121,50 @@ def disk_percent(path: str) -> Tuple[float, float, float, float]:
     return round(pct, 1), round(used / gb, 1), round(total / gb, 1), round(free / gb, 1)
 
 
+def conn_top_ports(n: int = 3) -> list:
+    """
+    Returns top N ports by active connection count.
+    Each entry: (port, tcp_count, udp_count)
+    TCP counts ESTABLISHED (state=01), UDP counts active sockets (state=07).
+    """
+    from collections import defaultdict
+    tcp_counts: Dict[int, int] = defaultdict(int)
+    udp_counts: Dict[int, int] = defaultdict(int)
+
+    for fname in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            with open(fname) as f:
+                next(f)  # skip header
+                for line in f:
+                    cols = line.split()
+                    if len(cols) < 4:
+                        continue
+                    if cols[3] == "01":  # ESTABLISHED
+                        port = int(cols[1].split(":")[1], 16)
+                        tcp_counts[port] += 1
+        except OSError:
+            pass
+
+    for fname in ("/proc/net/udp", "/proc/net/udp6"):
+        try:
+            with open(fname) as f:
+                next(f)  # skip header
+                for line in f:
+                    cols = line.split()
+                    if len(cols) < 4:
+                        continue
+                    if cols[3] == "07":  # active UDP socket
+                        port = int(cols[1].split(":")[1], 16)
+                        udp_counts[port] += 1
+        except OSError:
+            pass
+
+    all_ports = set(tcp_counts) | set(udp_counts)
+    results = [(p, tcp_counts.get(p, 0), udp_counts.get(p, 0)) for p in all_ports]
+    results.sort(key=lambda x: x[1] + x[2], reverse=True)
+    return results[:n]
+
+
 def net_bytes(iface: str) -> Tuple[int, int]:
     """Returns (rx_bytes, tx_bytes) from /proc/net/dev."""
     with open("/proc/net/dev") as f:
@@ -191,6 +237,7 @@ def run():
     prev_cpu  = {}
     prev_net  = {}
     prev_time = None
+    last_conn_report = 0.0
 
     print(f"[INFO] Monitor started on {host}. Interval={interval}s", flush=True)
 
@@ -273,6 +320,37 @@ def run():
 
         prev_net  = (cur_rx, cur_tx)
         prev_time = now
+
+        # ── Connections ──
+        conn_threshold = cfg.get("conn_alert_threshold", 0)
+        conn_interval  = cfg.get("conn_report_interval", 3600)
+        top = conn_top_ports(3)
+
+        # threshold alert: any port over limit
+        if conn_threshold > 0:
+            for port, tcp, udp in top:
+                total = tcp + udp
+                if total >= conn_threshold:
+                    key = f"conn:{port}"
+                    if state.can_alert(key):
+                        msg = (f"🔴 <b>[{host}] HIGH CONNECTIONS (:{port})</b>\n"
+                               f"Total: <b>{total}</b>  "
+                               f"(TCP {tcp} / UDP {udp})\n"
+                               f"Threshold: {conn_threshold}")
+                        send_tg(token, chat_id, msg)
+                        state.mark_alerted(key)
+                        print(f"[ALERT] CONN :{port} {total} (tcp={tcp} udp={udp})", flush=True)
+
+        # periodic top-3 report
+        if conn_interval > 0 and (now - last_conn_report) >= conn_interval:
+            if top:
+                lines = []
+                for i, (port, tcp, udp) in enumerate(top, 1):
+                    lines.append(f"  {i}. :{port}  {tcp + udp} 个  (TCP {tcp} / UDP {udp})")
+                msg = (f"📊 <b>[{host}] 连接数 Top 3</b>\n" + "\n".join(lines))
+                send_tg(token, chat_id, msg)
+                print(f"[INFO] CONN report sent", flush=True)
+            last_conn_report = now
 
         time.sleep(interval)
 

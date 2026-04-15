@@ -15,5 +15,7 @@
         "net_percent": 90,
         "net_consecutive": 3
     },
-    "cooldown": 1800
+    "cooldown": 1800,
+    "conn_report_interval": 3600,
+    "conn_alert_threshold": 200
 }
