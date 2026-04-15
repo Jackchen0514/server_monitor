@@ -1,0 +1,22 @@
+[Unit]
+Description=Lightweight Server Monitor (Telegram alerts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/monitor/monitor.py
+Restart=on-failure
+RestartSec=10
+Environment=MONITOR_CONFIG=/etc/monitor/config.json
+
+# Resource limits — keep the daemon tiny
+MemoryMax=32M
+CPUQuota=5%
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=server-monitor
+
+[Install]
+WantedBy=multi-user.target

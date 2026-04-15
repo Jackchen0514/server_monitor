@@ -1,0 +1,19 @@
+{
+    "telegram": {
+        "bot_token": "YOUR_BOT_TOKEN",
+        "chat_id": "YOUR_CHAT_ID"
+    },
+    "interval": 30,
+    "thresholds": {
+        "cpu_percent": 85,
+        "cpu_consecutive": 3,
+        "mem_percent": 90,
+        "disk_percent": 90,
+        "disk_paths": ["/", "/data"],
+        "net_interface": "eth0",
+        "net_max_mbps": 100,
+        "net_percent": 90,
+        "net_consecutive": 3
+    },
+    "cooldown": 1800
+}
