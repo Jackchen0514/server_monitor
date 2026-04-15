@@ -108,14 +108,15 @@ def mem_percent() -> Tuple[float, int, int]:
     return round(pct, 1), used // 1024, total // 1024
 
 
-def disk_percent(path: str) -> Tuple[float, int, int]:
-    """Returns (percent_used, used_gb, total_gb)."""
+def disk_percent(path: str) -> Tuple[float, float, float, float]:
+    """Returns (percent_used, used_gb, total_gb, avail_gb)."""
     s = os.statvfs(path)
     total = s.f_blocks * s.f_frsize
     free  = s.f_bavail * s.f_frsize
     used  = total - free
     pct   = used / total * 100 if total else 0.0
-    return round(pct, 1), used // (1024**3), total // (1024**3)
+    gb    = 1024 ** 3
+    return round(pct, 1), round(used / gb, 1), round(total / gb, 1), round(free / gb, 1)
 
 
 def net_bytes(iface: str) -> Tuple[int, int]:
@@ -226,7 +227,7 @@ def run():
         # ── Disk ──
         for path in thr.get("disk_paths", ["/"]):
             try:
-                disk_pct, disk_used, disk_total = disk_percent(path)
+                disk_pct, disk_used, disk_total, disk_avail = disk_percent(path)
             except OSError:
                 continue
             key = f"disk:{path}"
@@ -235,6 +236,7 @@ def run():
                     msg = (f"🔴 <b>[{host}] HIGH DISK ({path})</b>\n"
                            f"Usage: <b>{disk_pct}%</b> "
                            f"({disk_used} GB / {disk_total} GB)\n"
+                           f"Available: <b>{disk_avail} GB</b>\n"
                            f"Threshold: {thr['disk_percent']}%")
                     send_tg(token, chat_id, msg)
                     state.mark_alerted(key)
